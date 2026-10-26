@@ -54,8 +54,8 @@ gh secret set NTFY_TOPIC -R greed-d/serverhive-watch
 1. Sign in at <https://my.telegram.org/apps> with the account that is a member
    of **@ServerRentals** (join the group first if needed).
 2. Create an application. Copy the **api_id** and **api_hash**.
-3. Do not use a bot token. A bot cannot read this group's history, and the
-   group does not allow adding one for this purpose.
+3. Do not use a bot token. A bot is not used here because the group did not
+   allow adding one; reading `@ServerRentals` requires a user session.
 
 ### 3. Generate a Telethon session
 

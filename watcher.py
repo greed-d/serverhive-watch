@@ -119,6 +119,17 @@ def strip_html(value: str) -> str:
     return value.strip()
 
 
+def visible_text(value: str) -> str:
+    """Strip scripts/styles as well as tags, for page-content hashing."""
+    value = re.sub(
+        r"(?is)<(?:script|style|noscript|template)\b[^>]*>.*?</(?:script|style|noscript|template)>",
+        " ",
+        value or "",
+    )
+    return strip_html(value)
+
+
+
 def is_giveaway(text: str, links: list[str] | tuple[str, ...] = ()) -> bool:
     haystack = f"{text or ''}\n" + "\n".join(links or ())
     if "giveaway.serverhive.in" in haystack.lower():
@@ -551,7 +562,7 @@ def check_site(state: dict[str, Any], notifier: Notifier) -> bool:
         retries=0,
     )
     page = body.decode("utf-8", "replace")
-    visible = strip_html(page)
+    visible = visible_text(page)
     title_match = TITLE_RE.search(page)
     title = strip_html(title_match.group(1)) if title_match else ""
     challenge = bool(CHALLENGE_RE.search(visible))

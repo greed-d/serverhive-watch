@@ -73,6 +73,10 @@ class DetectTests(unittest.TestCase):
             watcher.is_giveaway("nothing here", ["https://giveaway.serverhive.in/"])
         )
 
+    def test_visible_text_ignores_scripts(self):
+        source = "<style>.x{color:red}</style><script>var nonce=1</script><p>Hello</p>"
+        self.assertEqual(watcher.visible_text(source), "Hello")
+
 
 class StateTests(unittest.TestCase):
     def test_text_dedupe(self):

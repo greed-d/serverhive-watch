@@ -41,7 +41,8 @@ Install the ntfy app ([Android](https://play.google.com/store/apps/details?id=io
 subscribe to the topic stored in the repository's `NTFY_TOPIC` secret.
 
 The topic value is deliberately not in this public repository. It was generated
-when the repo was created and is stored in `~/.setup.local.md` on that machine.
+when the repo was created and is stored in
+`~/Dev/serverhive-watch/.setup.local.md` on that machine.
 Treat it like a password: anyone with the topic can read the alerts. To rotate
 it:
 
@@ -93,8 +94,8 @@ gh secret list -R greed-d/serverhive-watch
 
 ```bash
 gh workflow run watch.yml -R greed-d/serverhive-watch
-gh run list -R greed-d/serverhive-watch --workflow watch.yml --limit 1
-gh run watch -R greed-d/serverhive-watch
+RUN_ID=$(gh run list -R greed-d/serverhive-watch --workflow watch.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run watch "$RUN_ID" -R greed-d/serverhive-watch
 ```
 
 On the first run after adding the Telegram secrets you should see:

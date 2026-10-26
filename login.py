@@ -11,8 +11,8 @@ from __future__ import annotations
 import os
 import sys
 
-from telethon import TelegramClient
 from telethon.sessions import StringSession
+from telethon.sync import TelegramClient
 
 API_ID = (os.getenv("TG_API_ID") or "").strip()
 API_HASH = (os.getenv("TG_API_HASH") or "").strip()
@@ -56,11 +56,16 @@ def main() -> int:
             lang_code="en",
             system_lang_code="en",
         ) as client:
+            # Print the session before verification so a network hiccup after
+            # login does not lose the auth key.
+            session_string = client.session.save()
+            print("\nStore this as the TG_SESSION_STRING GitHub secret:\n")
+            print(session_string)
+            print("\nVerifying login...")
+
             me = client.get_me()
             username = f"@{me.username}" if getattr(me, "username", None) else "(no username)"
-            print(f"\nLogged in as {me.first_name} {username} (id {me.id}).\n")
-            print("Store this as the TG_SESSION_STRING GitHub secret:\n")
-            print(client.session.save())
+            print(f"Logged in as {me.first_name} {username} (id {me.id}).")
             print(
                 "\nNever commit this string. To revoke it later, use Telegram "
                 "Settings -> Devices -> Terminate all sessions, then run this again."
@@ -69,7 +74,11 @@ def main() -> int:
         print("\nCancelled.")
         return 130
     except Exception as exc:
-        print(f"\nLogin failed: {type(exc).__name__}: {exc}")
+        print(f"\nLogin/verification failed: {type(exc).__name__}: {exc}")
+        print(
+            "If a session string was printed above, it may still be valid; "
+            "store it and check the watcher logs."
+        )
         return 1
 
     return 0

@@ -790,7 +790,7 @@ def check_group(
         return None
 
     try:
-        from telethon import TelegramClient
+        from telethon.sync import TelegramClient  # syncified methods
         from telethon.errors import FloodWaitError
         from telethon.sessions import StringSession
     except Exception as exc:

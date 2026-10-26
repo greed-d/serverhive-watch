@@ -1,0 +1,51 @@
+name: ServerHive giveaway watch
+
+on:
+  schedule:
+    # GitHub's minimum is every 5 minutes; scheduled runs are often delayed.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: serverhive-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run parser tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Restore watcher state
+        uses: actions/cache@v4
+        with:
+          path: .state.json
+          key: state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            state-
+
+      - name: Run watcher
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ vars.NTFY_SERVER }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+          STATE_FILE: .state.json
+        run: python watcher.py

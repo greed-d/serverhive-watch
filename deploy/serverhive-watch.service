@@ -1,0 +1,15 @@
+[Unit]
+Description=ServerHive giveaway watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Dev/serverhive-watch
+EnvironmentFile=%h/.config/serverhive-watch.env
+ExecStart=%h/Dev/serverhive-watch/.venv/bin/python %h/Dev/serverhive-watch/watcher.py --loop 60
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

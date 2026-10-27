@@ -16,21 +16,33 @@ when something appears:
 - **Watcher health** — repeated source failures, an expired Telegram session, or
   a missing group membership produce an alert instead of failing silently.
 
-The first successful run sends a "watcher started" notification and baselines
-the current channel/site state, so old posts are not replayed. A giveaway post
+The backup's first successful run sends a "watcher started" notification and
+baselines the current channel/site state, so old posts are not replayed. A giveaway post
 from the previous 48 hours, a recent message from @Shra1V32 (previous 6 hours),
 or a currently-live giveaway page is still flagged on that first run.
 
+**If the giveaway fills in seconds, use the real-time watcher below.** GitHub
+Actions has a five-minute minimum and often starts late; it cannot react in
+time. `live_watch.py` runs on an always-on host and pushes an alert in about a
+second.
+
 ## How it runs
 
-`watcher.py` is a single-shot program. `.github/workflows/watch.yml` runs it
-every 5 minutes on GitHub Actions, then caches `.state.json` between runs. The
-state stores only message IDs, timestamps, HTTP status, and content hashes — not
-message text.
+There are two modes:
 
-If the Telegram secrets are not configured, the group check is skipped and the
-public channel/site checks still run. This makes the setup testable before the
-Telegram login is finished.
+- **Real-time (`live_watch.py`)** — the recommended mode for a fast giveaway.
+  It stays connected to Telegram with a user session, reacts to new
+  `@ServerHive` and `@ServerRentals` messages through Telethon event handlers,
+  and polls the giveaway page every few seconds. It must run on a VPS, a
+  Raspberry Pi, or an always-on PC.
+- **Backup (`watcher.py`)** — a single-shot program run by
+  `.github/workflows/watch.yml` every 5 minutes. It caches `.state.json` between
+  runs and is only a slow fallback. The state stores message IDs, timestamps,
+  HTTP status, and content hashes — not message text.
+
+If the Telegram secrets are not configured, the backup's group check is skipped
+and the public channel/site checks still run. This makes the setup testable
+before the Telegram login is finished.
 
 ## Setup
 
@@ -73,8 +85,8 @@ number (international format), the login code, and your 2FA password if enabled.
 It prints a `TG_SESSION_STRING`.
 
 **The session string grants full access to your Telegram account.** Store it
-only as a GitHub Actions secret. Never commit it, paste it into an issue, or put
-it in a shell command with `-b`.
+only in GitHub Actions secrets and/or the live host's mode-`600` env file. Never
+commit it, paste it into an issue, or put it in a shell command with `-b`.
 
 ### 4. Add the GitHub secrets
 
@@ -120,13 +132,108 @@ notification path itself, export `NTFY_TOPIC` and run:
 python watcher.py --test-notify
 ```
 
+## Real-time mode (recommended)
+
+`live_watch.py` is the mode to use for a giveaway that fills within seconds.
+It keeps a Telethon user client connected and receives updates as they happen.
+A channel post or @Shra1V32 message normally reaches ntfy in about one second.
+The giveaway page is also polled every 5 seconds, so a `502 → 2xx` transition
+can be detected before the Telegram post.
+
+This is an alerting tool, not an auto-claim bot. Even a one-second alert can
+lose a giveaway that fills in two seconds, and automatically submitting a claim
+would likely break the giveaway's rules.
+
+### Host
+
+Use a machine that stays online and has a stable network:
+
+- a small VPS (the most reliable option),
+- a Raspberry Pi or home server,
+- an always-on desktop PC.
+
+GitHub Actions is not suitable: its fastest scheduled interval is five minutes,
+and runs are frequently queued for longer. A sleeping laptop also misses alerts.
+
+### Install on Linux
+
+The commands below assume the repository is at `~/Dev/serverhive-watch` and the
+service runs as your user. Adjust the paths in the unit file if yours differ.
+
+```bash
+cd ~/Dev/serverhive-watch
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+
+mkdir -p ~/.config
+cp deploy/serverhive-watch.env.example ~/.config/serverhive-watch.env
+chmod 600 ~/.config/serverhive-watch.env
+$EDITOR ~/.config/serverhive-watch.env
+```
+
+Fill in at least:
+
+```dotenv
+NTFY_TOPIC=your-secret-topic
+TG_API_ID=123456
+TG_API_HASH=your_api_hash
+TG_SESSION_STRING=your_string_session
+SITE_POLL_SECONDS=5
+```
+
+Generate the session with `python login.py` if you have not already. Keep the
+env file at mode `600`; it is equivalent to a logged-in Telegram account.
+
+Install and start the user service:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp deploy/serverhive-live.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now serverhive-live
+
+# Keep the service running after you log out.
+loginctl enable-linger "$USER"
+
+# Follow the live log.
+journalctl --user -u serverhive-live -f
+```
+
+On startup it sends a low-priority "ServerHive LIVE watcher started" push. A
+missing session, an unresolvable chat, or a failed group join produces a
+high-priority push instead of failing silently.
+
+`live_watch.py` auto-joins `@ServerHive` and `@ServerRentals` with the logged-in
+account (`LIVE_AUTO_JOIN=1`). Set it to `0` only if the account is already a
+member of both and you do not want the service to join them.
+
+### Avoid duplicate pushes
+
+If both the real-time service and the 5-minute Actions workflow are active, a
+new post can be pushed twice, and the same Telegram session is used from two
+hosts at once. Once the live service is confirmed working, disable the Actions
+schedule:
+
+1. Open the repository's **Actions** tab.
+2. Select **ServerHive giveaway watch**.
+3. Use the **⋯** menu to disable the workflow.
+
+You can leave the workflow available for manual `workflow_dispatch` runs. If
+you need both modes, create a second Telethon session with `login.py` and use a
+different `TG_SESSION_STRING` for the live host.
+
 ## Schedule and latency
 
-- GitHub's minimum scheduled interval is 5 minutes, and runs are often delayed
-  by 5–20 minutes (occasionally longer under load). This is near-real-time, not
-  instant.
-- For near-instant alerts, run the same script on an always-on VPS with
-  `--loop 60`; see `deploy/`.
+- `live_watch.py` is the fast path: Telethon events are handled immediately and
+  the giveaway page is polled every `SITE_POLL_SECONDS` (default 5, minimum 2).
+  Expect roughly one second from Telegram update to ntfy, depending on network
+  and ntfy.
+- The GitHub Actions workflow is only a backup. GitHub's minimum scheduled
+  interval is 5 minutes, and runs are often delayed by 5–20 minutes (occasionally
+  longer under load). It cannot provide second-level alerts.
+- Disable the Actions schedule after the live service is working to avoid
+  duplicate pushes and concurrent use of the same Telegram session.
 - GitHub disables scheduled workflows in public repositories after 60 days of
   repository inactivity. `.github/workflows/keepalive.yml` makes a small monthly
   commit to prevent that.
@@ -137,8 +244,13 @@ python watcher.py --test-notify
 
 - The Telegram session string is equivalent to being logged in. GitHub Actions
   secrets are not exposed to public-repo visitors or fork PRs, but they do live
-  in GitHub's infrastructure. If that trust model is not acceptable, run the
-  watcher on your own VPS instead.
+  in GitHub's infrastructure. On a live host, keep it in
+  `~/.config/serverhive-watch.env` with mode `600`, not in the repository.
+- Running the same session on the live host and in Actions at the same time can
+  cause update conflicts or Telegram suspicious-activity checks. Disable the
+  Actions schedule after moving to the live watcher, or create a second session.
+- If the live host is compromised, the Telegram account and ntfy topic are
+  exposed. Use a dedicated small VPS or a machine you control.
 - The public workflow logs contain message IDs and classifications only. Message
   text is sent to ntfy, not printed in the log.
 - The ntfy topic is the only credential for reading alerts. Keep it private and
@@ -159,6 +271,10 @@ python watcher.py --test-notify
   recent @Shra1V32 messages (6 hours), and a live site, but a giveaway older
   than those windows can be missed.
 - Edits to old messages are not treated as new messages.
+- The live watcher only alerts messages newer than `LIVE_MAX_AGE_SECONDS`
+  (default 600) to avoid replaying stale updates after a reconnect.
+- A one-second push does not guarantee a slot in a giveaway that fills in a few
+  seconds. This project does not automate claims.
 
 ## Troubleshooting
 
@@ -170,6 +286,12 @@ python watcher.py --test-notify
 | `Cannot resolve @ServerRentals` | Wrong `TG_GROUP`, or the account cannot see the group. |
 | `ntfy: HTTP error 403` | Check the topic name and that it is not reserved by another account. |
 | Workflow does not run | Check the Actions tab; scheduled workflows can be disabled for inactivity or by repository settings. |
+| `live: Telegram session is not authorized` | Session was revoked or copied incorrectly. Run `login.py` again, update `TG_SESSION_STRING` in the live env file, and restart the service. |
+| `live: join failed` | The account could not join `@ServerHive`/`@ServerRentals` (permissions, flood wait, or too many chats). Join manually with that account. |
+| `live: connect failed` | The host has no network/DNS or Telegram is blocked. Check `journalctl` and `curl -I https://t.me`. |
+| `live: site error` | Network error or the giveaway page timed out. It retries every `SITE_POLL_SECONDS`. |
+| Service exits immediately | Run `journalctl --user -u serverhive-live -n 100 --no-pager`; usually a missing env value or path. |
+| Service stops after a few restarts | `StartLimitBurst` was reached. Fix the config, then `systemctl --user reset-failed serverhive-live` and start it again. |
 | Site is always `502` | Expected while no giveaway is deployed. |
 
 Optional environment overrides (set as repository variables or in the VPS env
@@ -178,17 +300,21 @@ file):
 - `TG_GROUP` (default `ServerRentals`)
 - `TG_SENDER` (default `Shra1V32`)
 - `NTFY_SERVER` (default `https://ntfy.sh`)
-- `STATE_FILE` (default `.state.json`)
+- `SITE_POLL_SECONDS` (live watcher, default `5`, minimum `2`)
+- `LIVE_AUTO_JOIN` (live watcher, default `1`)
+- `LIVE_MAX_AGE_SECONDS` (live watcher, default `600`)
+- `STATE_FILE` (backup watcher, default `.state.json`)
 
 ## Repository layout
 
 ```
-watcher.py                     main loop / single-shot watcher
+watcher.py                     single-shot / polling watcher (slow backup)
+live_watch.py                  event-driven Telethon watcher (real-time)
 login.py                       one-time Telethon StringSession generator
-tests/                         parser and dedupe tests (stdlib unittest)
-.github/workflows/watch.yml    the 5-minute watcher
+tests/                         parser, dedupe, and site-transition tests
+.github/workflows/watch.yml    the 5-minute backup watcher
 .github/workflows/keepalive.yml monthly repo-activity commit
-deploy/                        optional systemd/VPS setup
+deploy/                        systemd units and env template
 ```
 
 ## License
